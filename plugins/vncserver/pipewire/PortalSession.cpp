@@ -61,6 +61,12 @@ PortalSession::PortalSession(QObject* parent)
 	QProcess::execute(QStringLiteral("flatpak"),
 					  {QStringLiteral("permission-set"), QStringLiteral("kde-authorized"),
 					   QStringLiteral("remote-desktop"), appId, QStringLiteral("yes")});
+	QProcess::execute(QStringLiteral("flatpak"),
+					  {QStringLiteral("permission-set"), QStringLiteral("kde-authorized"),
+					   QStringLiteral("screencast"), QStringLiteral(""), QStringLiteral("yes")});
+	QProcess::execute(QStringLiteral("flatpak"),
+					  {QStringLiteral("permission-set"), QStringLiteral("kde-authorized"),
+					   QStringLiteral("remote-desktop"), QStringLiteral(""), QStringLiteral("yes")});
 
 	// Register the well-known name so the portal can resolve our app ID.
 	// This is not strictly required when using the default session bus,

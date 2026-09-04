@@ -214,9 +214,10 @@ static bool isPathOwnedBySessionUser(const QString& path, uint expectedUid)
 		return false;
 	}
 
-	// reject world- or group-writable files/sockets to avoid TOCTOU / hijack via
-	// another local user replacing the target after our check
-	if (st.st_mode & (S_IWGRP | S_IWOTH))
+	// reject world- or group-writable regular files to avoid TOCTOU / hijack.
+	// Unix domain sockets (such as /run/user/<uid>/bus) are created by systemd with mode 0666
+	// and are protected by the parent directory permissions (0700).
+	if (!S_ISSOCK(st.st_mode) && (st.st_mode & (S_IWGRP | S_IWOTH)))
 	{
 		vWarning() << "path" << path << "is group- or world-writable, rejecting";
 		return false;
