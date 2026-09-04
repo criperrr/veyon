@@ -3,21 +3,56 @@
 # Script de Padronização, Compilação e Configuração Total do Veyon
 # Compatível com Debian 13 (Trixie), KDE Plasma 6 (Wayland) e MacBooks (Apple Silicon / Intel)
 #
-# Este script:
-#  1. Instala todas as dependências de build e runtime (PipeWire, Qt6, Flatpak, QCA, etc.)
-#  2. Compila e instala o Veyon com patches para Wayland, sockets do systemd e MegaAuth
-#  3. Configura o Veyon para modo 100% SILENCIOSO (sem ícone na bandeja, sem notificações)
-#  4. Configura autenticação por chave criptográfica (AuthKeys) sem senhas de alunos
-#  5. Configura alta prioridade de processo (Nice -10, proteção OOM) no systemd
-#  6. Pré-autoriza o Portal KDE Wayland (ScreenCast e RemoteDesktop) para TODOS os
-#     usuários (atuais, locais e futuros via Active Directory / LDAP) com ZERO POP-UPS
-#  7. Configura permissões de bloqueio de teclado e touchpad (EVIOCGRAB / veyon-input-helper)
-#  8. Bloqueia tentativas de alunos desativarem o serviço via Polkit
+# Suporta:
+#  - Execução local: ./build_and_install.sh
+#  - Execução remota direta (one-liner): curl -sSL https://raw.githubusercontent.com/criperrr/veyon/main/build_and_install.sh | sudo bash
 # ==============================================================================
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_URL="https://github.com/criperrr/veyon.git"
+REPO_BRANCH="main"
+
+run_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+export DEBIAN_FRONTEND=noninteractive
+
+# ------------------------------------------------------------------------------
+# 0. Verificação e Auto-Bootstrap (Execução via curl | bash)
+# ------------------------------------------------------------------------------
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+if [ -z "${SCRIPT_SOURCE}" ] || [ "${SCRIPT_SOURCE}" = "bash" ] || [ ! -f "${SCRIPT_SOURCE}" ]; then
+    CURRENT_DIR="$(pwd)"
+else
+    CURRENT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
+fi
+
+# Se não estivermos dentro do repositório clonado, realiza clone shallow ultra-rápido
+if [ ! -f "${CURRENT_DIR}/CMakeLists.txt" ] || [ ! -f "${CURRENT_DIR}/core/src/VeyonCore.cpp" ]; then
+    echo "======================================================================"
+    echo "    Execução Remota Detectada (curl | bash) - Auto-Bootstrap Ativado"
+    echo "======================================================================"
+    
+    echo "-> Instalando pacotes mínimos (git, curl, ca-certificates)..."
+    run_root apt-get update -qq
+    run_root apt-get install -y -qq git curl ca-certificates
+    
+    WORK_DIR="/opt/veyon-source"
+    echo "-> Clonando ${REPO_URL} (${REPO_BRANCH}) com profundidade 1 em ${WORK_DIR}..."
+    run_root rm -rf "${WORK_DIR}"
+    run_root git clone --depth 1 -b "${REPO_BRANCH}" "${REPO_URL}" "${WORK_DIR}"
+    
+    echo "-> Executando instalação a partir de ${WORK_DIR}..."
+    exec run_root bash "${WORK_DIR}/build_and_install.sh" "$@"
+fi
+
+SCRIPT_DIR="${CURRENT_DIR}"
 BUILD_DIR="${SCRIPT_DIR}/build"
 JOBS="$(nproc)"
 
@@ -29,16 +64,6 @@ echo "Diretório de build   : ${BUILD_DIR}"
 echo "Núcleos de CPU       : ${JOBS}"
 echo "Ambiente detectado   : $(uname -m) - Linux $(uname -r)"
 echo "======================================================================"
-
-run_root() {
-    if [ "$(id -u)" -eq 0 ]; then
-        "$@"
-    else
-        sudo "$@"
-    fi
-}
-
-export DEBIAN_FRONTEND=noninteractive
 
 # ------------------------------------------------------------------------------
 # 1. Instalação de Dependências de Build e Runtime
@@ -108,9 +133,6 @@ echo ""
 echo "[2/8] Aplicando correções no código-fonte do Veyon..."
 
 # A) Patch de socket UNIX do systemd em LinuxServiceCore.cpp
-# No Debian/systemd, /run/user/<UID>/bus é criado com permissão 0666 dentro de diretório 0700.
-# O Veyon original rejeita o socket por ter bits de escrita para grupo/outros.
-# Permitimos sockets UNIX (S_ISSOCK) para garantir que DBUS_SESSION_BUS_ADDRESS não seja descartado.
 CORE_SERVICE_FILE="${SCRIPT_DIR}/plugins/platform/linux/LinuxServiceCore.cpp"
 if grep -q 'if (st.st_mode & (S_IWGRP | S_IWOTH))' "${CORE_SERVICE_FILE}" 2>/dev/null; then
     sed -i 's/if (st.st_mode & (S_IWGRP | S_IWOTH))/if (!S_ISSOCK(st.st_mode) \&\& (st.st_mode \& (S_IWGRP | S_IWOTH)))/' "${CORE_SERVICE_FILE}"
@@ -118,8 +140,6 @@ if grep -q 'if (st.st_mode & (S_IWGRP | S_IWOTH))' "${CORE_SERVICE_FILE}" 2>/dev
 fi
 
 # B) Patch em PortalSession.cpp para pré-autorização MegaAuth de processos Host (app_id="")
-# Aplicações não empacotadas em Flatpak se identificam no xdg-desktop-portal com app_id vazio ("").
-# O xdg-desktop-portal-kde verifica a tabela kde-authorized especificamente para a chave vazia ("").
 PORTAL_SESSION_FILE="${SCRIPT_DIR}/plugins/vncserver/pipewire/PortalSession.cpp"
 if ! grep -q 'QStringLiteral("screencast"), QStringLiteral("")' "${PORTAL_SESSION_FILE}" 2>/dev/null; then
     sed -i '/QStringLiteral("remote-desktop"), appId, QStringLiteral("yes")});/a \
@@ -150,7 +170,7 @@ cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \
 
 make -j"${JOBS}"
 
-# Criação de links simbólicos dentro do build para permitir testes locais do veyon-cli
+# Criação de links simbólicos dentro do build para testes locais do veyon-cli
 mkdir -p "${BUILD_DIR}/lib/veyon"
 find "${BUILD_DIR}/plugins" -name "*.so" -exec ln -sf '{}' "${BUILD_DIR}/lib/veyon/" ';'
 
@@ -160,7 +180,7 @@ run_root make install
 echo "/usr/local/lib/veyon" | run_root tee /etc/ld.so.conf.d/veyon.conf > /dev/null
 run_root ldconfig
 
-# Assegura que os helpers privilegiados possuem o bit SUID root
+# Assegura permissão SUID root para os helpers privilegiados
 run_root chmod 4755 /usr/local/bin/veyon-input-helper
 run_root chmod 4755 /usr/local/bin/veyon-auth-helper
 
@@ -171,7 +191,6 @@ echo ""
 echo "[4/8] Configurando Veyon para execução silenciosa e sem confirmações..."
 
 run_root mkdir -p /var/log/veyon
-# Diretório de logs com sticky bit (1777) para permitir que sessões de usuários criem seus próprios logs
 run_root chmod 1777 /var/log/veyon
 
 # Ocultar ícone da bandeja, silenciar notificações e desativar confirmações
@@ -195,10 +214,18 @@ echo "[5/8] Verificando e configurando chaves de autenticação (AuthKeys)..."
 
 KEY_PUBLIC_DIR="/etc/veyon/keys/public/teacher"
 KEY_PRIVATE_DIR="/etc/veyon/keys/private/teacher"
+BUNDLED_PUB_KEY="${SCRIPT_DIR}/keys/teacher_public.key"
+
+run_root mkdir -p "${KEY_PUBLIC_DIR}"
 
 if [ ! -f "${KEY_PUBLIC_DIR}/key" ]; then
-    echo "   -> Gerando novo par de chaves 'teacher'..."
-    run_root /usr/local/bin/veyon-cli authkeys create teacher
+    if [ -f "${BUNDLED_PUB_KEY}" ]; then
+        echo "   -> Instalando chave pública mestra compartilhada do repositório..."
+        run_root cp "${BUNDLED_PUB_KEY}" "${KEY_PUBLIC_DIR}/key"
+    else
+        echo "   -> Gerando novo par de chaves 'teacher'..."
+        run_root /usr/local/bin/veyon-cli authkeys create teacher
+    fi
 fi
 
 # Chave pública DEVE ser legível por qualquer usuário logado na máquina
@@ -221,10 +248,9 @@ echo "[6/8] Padronizando permissões de ScreenCast e RemoteDesktop no KDE Waylan
 # A) Script de pré-autorização executado na inicialização da sessão gráfica
 run_root tee /usr/local/bin/veyon-plasma-preauth.sh > /dev/null << 'PREAUTH_EOF'
 #!/bin/sh
-# Executado dentro da sessão gráfica de qualquer usuário logado (local ou Active Directory)
 APP_ID="io.veyon.veyon-server"
 
-# Método 1: Flatpak permission-set (autoriza tanto o app_id nomeado quanto o vazio de processo host)
+# Método 1: Flatpak permission-set
 if command -v flatpak >/dev/null 2>&1; then
     flatpak permission-set kde-authorized screencast "${APP_ID}" yes 2>/dev/null || true
     flatpak permission-set kde-authorized remote-desktop "${APP_ID}" yes 2>/dev/null || true
@@ -367,7 +393,6 @@ run_root pam-auth-update --enable veyon-session --package
 echo ""
 echo "[7/8] Configurando regras de Udev e bloqueio anti-evasão no Polkit..."
 
-# Regra udev para dispositivos de entrada e uinput
 run_root tee /etc/udev/rules.d/99-veyon-input.rules > /dev/null << 'UDEV_EOF'
 KERNEL=="uinput", MODE="0660", GROUP="input"
 SUBSYSTEM=="input", KERNEL=="event*", MODE="0660", GROUP="input"
@@ -375,9 +400,7 @@ UDEV_EOF
 run_root udevadm control --reload-rules 2>/dev/null || true
 run_root udevadm trigger 2>/dev/null || true
 
-# Regra polkit impedindo que usuários comuns parem o Veyon ou alterem configurações
 run_root tee /etc/polkit-1/rules.d/50-veyon.rules > /dev/null << 'POLKIT_EOF'
-// Impede que alunos/usuários comuns desativem o Veyon ou alterem suas configs
 polkit.addRule(function(action, subject) {
     if (action.id === "io.veyon.veyon-configurator") {
         if (subject.isInGroup("sudo")) {
@@ -446,8 +469,6 @@ echo " - Veyon roda de forma silenciosa e invisível em qualquer sessão."
 echo " - O servidor inicia automaticamente para qualquer usuário (local ou AD)."
 echo " - KDE Plasma 6 Wayland pré-autorizado com MegaAuth (ZERO DIÁLOGOS / POP-UPS)."
 echo " - Teclado e touchpad podem ser bloqueados remotamente (EVIOCGRAB)."
+echo " - Chave pública do professor configurada: ${KEY_PUBLIC_DIR}/key"
 echo " - Serviço protegido contra OOM e tentativas de finalização por alunos."
-echo ""
-echo "CHAVE PÚBLICA (Alunos): ${KEY_PUBLIC_DIR}/key"
-echo "CHAVE PRIVADA (Professor): ${KEY_PRIVATE_DIR}/key"
 echo "======================================================================"
