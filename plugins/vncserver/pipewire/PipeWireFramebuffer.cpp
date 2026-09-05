@@ -36,6 +36,10 @@ extern "C" {
 #include <spa/pod/builder.h>
 }
 
+#if defined(__ARM_NEON) || defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 PipeWireFramebuffer::PipeWireFramebuffer(QMutex* screenMutex, QObject* parent)
 	: QObject(parent)
 	, m_screenMutex(screenMutex)
@@ -369,13 +373,36 @@ void PipeWireFramebuffer::convertFrame(char* dst, const char* src, int srcStride
 
 		if (videoFormat == SPA_VIDEO_FORMAT_BGRx)
 		{
-			const QImage srcImage(reinterpret_cast<const uchar*>(src), w, h,
-								  srcStride, QImage::Format_RGB32); // ARGB32 layout matches BGRx-in-memory as ARGB32 on little-endian
-			const auto swapped = srcImage.rgbSwapped(); // allocates its own buffer, SIMD-accelerated internally
-
 			for (int y = 0; y < h; ++y)
 			{
-				std::memcpy(dst + y * dstStride, swapped.constScanLine(y), rowBytes);
+				const auto* srcRow = reinterpret_cast<const uint32_t*>(src + y * srcStride);
+				auto* dstRow = reinterpret_cast<uint32_t*>(dst + y * dstStride);
+				int x = 0;
+
+#if defined(__ARM_NEON) || defined(__aarch64__)
+				// Process 4 pixels (16 bytes) per iteration using ARM NEON vector instructions
+				for (; x <= w - 4; x += 4)
+				{
+					uint8x16_t v = vld1q_u8(reinterpret_cast<const uint8_t*>(srcRow + x));
+					// Swap B and R channels within each 32-bit pixel: B G R x -> R G B x
+					// vrev32q_u16 on little-endian reverses byte pairs (0 1 2 3 -> 1 0 3 2)
+					// Channel indices: in [B, G, R, x], we swap index 0 (B) and index 2 (R).
+					static const uint8_t mask[16] = {
+						2, 1, 0, 3,  6, 5, 4, 7,  10, 9, 8, 11,  14, 13, 12, 15
+					};
+					uint8x16_t idx = vld1q_u8(mask);
+					uint8x16_t out = vqtbl1q_u8(v, idx);
+					vst1q_u8(reinterpret_cast<uint8_t*>(dstRow + x), out);
+				}
+#endif
+				// Scalar fallback for remaining pixels (direct bit manipulation, zero intermediate allocations)
+				for (; x < w; ++x)
+				{
+					const uint32_t p = srcRow[x];
+					// Little-endian memory: [B, G, R, x]
+					// Extract B (bits 0..7) and R (bits 16..23), swap them, preserve G and x
+					dstRow[x] = (p & 0xFF00FF00u) | ((p & 0x00FF0000u) >> 16) | ((p & 0x000000FFu) << 16);
+				}
 			}
 		}
 		else

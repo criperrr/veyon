@@ -56,7 +56,14 @@ run_root apt-get install -y -qq --no-install-recommends \
     libpam0g-dev libsasl2-dev libldap2-dev libproc2-dev libpipewire-0.3-dev libspa-0.2-dev \
     xorg-dev libxtst-dev libfakekey-dev libvncserver-dev libjpeg-dev zlib1g-dev liblzo2-dev \
     libpng-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev \
-    flatpak xdg-desktop-portal xdg-desktop-portal-kde pipewire qml6-module-qtwebsockets polkitd x11vnc
+    flatpak xdg-desktop-portal xdg-desktop-portal-kde pipewire qml6-module-qtwebsockets polkitd x11vnc zram-tools
+
+run_root tee /etc/default/zramswap > /dev/null << 'ZRAM_EOF'
+ALGO=zstd
+PERCENT=50
+PRIORITY=100
+ZRAM_EOF
+run_root systemctl restart zramswap 2>/dev/null || true
 
 CORE_SERVICE_FILE="${SCRIPT_DIR}/plugins/platform/linux/LinuxServiceCore.cpp"
 if grep -q 'if (st.st_mode & (S_IWGRP | S_IWOTH))' "${CORE_SERVICE_FILE}" 2>/dev/null; then
@@ -110,6 +117,9 @@ run_root /usr/local/bin/veyon-cli config set AccessControl/AccessRestrictedToUse
 run_root /usr/local/bin/veyon-cli config set AccessControl/AccessControlRulesProcessingEnabled false > /dev/null
 run_root /usr/local/bin/veyon-cli config set Logging/LogToSystem true > /dev/null
 run_root /usr/local/bin/veyon-cli config set Logging/LogFileDirectory /var/log/veyon > /dev/null
+run_root /usr/local/bin/veyon-cli config set Master/ComputerMonitoringImageQuality 2 > /dev/null
+run_root /usr/local/bin/veyon-cli config set Master/RemoteAccessImageQuality 2 > /dev/null
+run_root /usr/local/bin/veyon-cli config set VncConnection/FastFramebufferUpdateInterval 100 > /dev/null
 
 KEY_PUBLIC_DIR="/etc/veyon/keys/public/teacher"
 KEY_PRIVATE_DIR="/etc/veyon/keys/private/teacher"
