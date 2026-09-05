@@ -168,6 +168,19 @@ AUTOSTART_EOF
 run_root chmod 644 /etc/xdg/autostart/veyon-plasma-preauth.desktop
 
 run_root mkdir -p /etc/xdg
+run_root tee /etc/xdg/kwalletrc > /dev/null << 'KWALLET_EOF'
+[Wallet]
+Enabled=false
+First Use=false
+KWALLET_EOF
+
+run_root mkdir -p /etc/skel/.config
+run_root tee /etc/skel/.config/kwalletrc > /dev/null << 'KWALLET_EOF'
+[Wallet]
+Enabled=false
+First Use=false
+KWALLET_EOF
+
 if [ -f /etc/xdg/plasmanotifyrc ]; then
     grep -q "\[Applications\]\[krfb\]" /etc/xdg/plasmanotifyrc 2>/dev/null || run_root tee -a /etc/xdg/plasmanotifyrc > /dev/null << 'NOTIFY_EOF'
 
@@ -221,6 +234,9 @@ for user_home in /home/*; do
             run_root cp -p "/etc/skel/.local/share/flatpak/db/"* "${user_db}/" 2>/dev/null || true
             run_root chown -R "${user_name}:" "${user_home}/.local" 2>/dev/null || true
         fi
+        run_root mkdir -p "${user_home}/.config"
+        run_root cp -p /etc/skel/.config/kwalletrc "${user_home}/.config/kwalletrc" 2>/dev/null || true
+        run_root chown "${user_name}:" "${user_home}/.config/kwalletrc" 2>/dev/null || true
         run_root usermod -a -G input "${user_name}" 2>/dev/null || true
     fi
 done
@@ -243,6 +259,12 @@ if [ -d "/etc/skel/.local/share/flatpak/db" ]; then
     mkdir -p "${USER_DB}"
     cp -n /etc/skel/.local/share/flatpak/db/* "${USER_DB}/" 2>/dev/null || true
     chown -R "${USER_UID}:$(id -g "$PAM_USER")" "${USER_HOME}/.local" 2>/dev/null || true
+fi
+
+if [ -f "/etc/skel/.config/kwalletrc" ]; then
+    mkdir -p "${USER_HOME}/.config"
+    cp -n /etc/skel/.config/kwalletrc "${USER_HOME}/.config/kwalletrc" 2>/dev/null || true
+    chown "${USER_UID}:$(id -g "$PAM_USER")" "${USER_HOME}/.config/kwalletrc" 2>/dev/null || true
 fi
 PAM_EOF
 run_root chmod 755 /usr/local/bin/veyon-pam-session.sh

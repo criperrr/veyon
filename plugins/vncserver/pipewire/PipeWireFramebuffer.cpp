@@ -267,7 +267,16 @@ void PipeWireFramebuffer::onStreamStateChanged(void* data,
 	auto* self = static_cast<PipeWireFramebuffer*>(data);
 	vDebug() << "PipeWire stream state:" << pw_stream_state_as_string(state);
 
-	if (state == PW_STREAM_STATE_ERROR ||
+	if (state == PW_STREAM_STATE_STREAMING)
+	{
+		if (!self->m_active)
+		{
+			vDebug() << "PipeWire stream entered STREAMING but no client connected; pausing stream";
+			self->m_pausedByUs = true;
+			pw_stream_set_active(self->m_stream, false);
+		}
+	}
+	else if (state == PW_STREAM_STATE_ERROR ||
 		state == PW_STREAM_STATE_UNCONNECTED ||
 		(state == PW_STREAM_STATE_PAUSED && oldState == PW_STREAM_STATE_STREAMING && !self->m_pausedByUs))
 	{
