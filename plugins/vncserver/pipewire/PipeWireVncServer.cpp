@@ -106,6 +106,12 @@ bool PipeWireVncServer::runServer(int serverPort, const Password& password)
 		if (m_rfbScreen)
 		{
 			rfbProcessEvents(m_rfbScreen, 0);
+
+			const bool hasClients = (m_rfbScreen->clientHead != nullptr);
+			if (m_framebuffer && m_framebuffer->isActive() != hasClients)
+			{
+				m_framebuffer->setActive(hasClients);
+			}
 		}
 		m_screenMutex.unlock();
 
@@ -138,6 +144,16 @@ void PipeWireVncServer::onPortalStarted()
 	{
 		vCritical() << "Failed to open PipeWire framebuffer – will retry";
 		QTimer::singleShot(5000, this, [this]() { m_shouldRestart = true; });
+	}
+	else
+	{
+		m_screenMutex.lock();
+		const bool hasClients = (m_rfbScreen && m_rfbScreen->clientHead != nullptr);
+		m_screenMutex.unlock();
+		if (!hasClients)
+		{
+			m_framebuffer->setActive(false);
+		}
 	}
 }
 

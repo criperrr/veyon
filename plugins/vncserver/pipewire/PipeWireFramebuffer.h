@@ -70,6 +70,8 @@ public:
 	void close();
 
 	bool isRunning() const { return m_running; }
+	void setActive(bool active);
+	bool isActive() const { return m_active; }
 
 Q_SIGNALS:
 	void streamEnded();
@@ -99,6 +101,8 @@ private:
 	QSize            m_frameSize;
 	uint32_t         m_videoFormat{SPA_VIDEO_FORMAT_UNKNOWN};
 	bool             m_running{false};
+	bool             m_active{true};
+	bool             m_pausedByUs{false};
 
 	std::unique_ptr<QThread> m_loopThread;
 };

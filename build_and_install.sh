@@ -27,12 +27,26 @@ if [ ! -f "${CURRENT_DIR}/CMakeLists.txt" ] || [ ! -f "${CURRENT_DIR}/core/src/V
     WORK_DIR="/opt/veyon-source"
     run_root rm -rf "${WORK_DIR}"
     run_root git clone --depth 1 -b "${REPO_BRANCH}" "${REPO_URL}" "${WORK_DIR}"
+    (cd "${WORK_DIR}" && run_root git submodule update --init --recursive)
     exec run_root bash "${WORK_DIR}/build_and_install.sh" "$@"
 fi
 
 SCRIPT_DIR="${CURRENT_DIR}"
 BUILD_DIR="${SCRIPT_DIR}/build"
 JOBS="$(nproc)"
+if [ "${JOBS}" -gt 4 ]; then
+    JOBS=4
+fi
+
+if [ "$(swapon --show --noheadings 2>/dev/null | wc -l)" -eq 0 ] && [ ! -f /swapfile ]; then
+    run_root fallocate -l 4G /swapfile 2>/dev/null || run_root dd if=/dev/zero of=/swapfile bs=1M count=4096 2>/dev/null || true
+    run_root chmod 600 /swapfile 2>/dev/null || true
+    run_root mkswap /swapfile 2>/dev/null || true
+    run_root swapon /swapfile 2>/dev/null || true
+    if ! grep -q "/swapfile" /etc/fstab 2>/dev/null; then
+        echo "/swapfile none swap sw 0 0" | run_root tee -a /etc/fstab > /dev/null
+    fi
+fi
 
 run_root apt-get update -qq
 run_root apt-get install -y -qq --no-install-recommends \

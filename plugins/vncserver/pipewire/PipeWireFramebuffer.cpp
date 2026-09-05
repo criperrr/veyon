@@ -127,6 +127,7 @@ bool PipeWireFramebuffer::open(int fd, quint32 nodeId, rfbScreenInfoPtr screen)
 
 	spa_video_info_raw videoInfo{};
 	videoInfo.format = SPA_VIDEO_FORMAT_BGRx;
+	videoInfo.max_framerate = SPA_FRACTION(15, 1);
 
 	const spa_pod* params[1];
 	params[0] = spa_format_video_raw_build(&builder, SPA_PARAM_EnumFormat, &videoInfo);
@@ -214,6 +215,29 @@ void PipeWireFramebuffer::close()
 	}
 }
 
+void PipeWireFramebuffer::setActive(bool active)
+{
+	if (m_active == active)
+	{
+		return;
+	}
+
+	m_active = active;
+	if (m_loop && m_stream)
+	{
+		m_pausedByUs = !active;
+		pw_loop_invoke(pw_main_loop_get_loop(m_loop),
+			[](struct spa_loop*, bool, uint32_t, const void*, size_t, void* user_data) -> int {
+				auto* self = static_cast<PipeWireFramebuffer*>(user_data);
+				if (self && self->m_stream)
+				{
+					pw_stream_set_active(self->m_stream, self->m_active);
+				}
+				return 0;
+			}, 0, nullptr, 0, false, this);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // PipeWire C callbacks (called from PipeWire loop thread)
 // ---------------------------------------------------------------------------
@@ -241,7 +265,7 @@ void PipeWireFramebuffer::onStreamStateChanged(void* data,
 
 	if (state == PW_STREAM_STATE_ERROR ||
 		state == PW_STREAM_STATE_UNCONNECTED ||
-		(state == PW_STREAM_STATE_PAUSED && oldState == PW_STREAM_STATE_STREAMING))
+		(state == PW_STREAM_STATE_PAUSED && oldState == PW_STREAM_STATE_STREAMING && !self->m_pausedByUs))
 	{
 		if (error)
 		{
@@ -455,6 +479,13 @@ void PipeWireFramebuffer::processFrame()
 		char* oldBuf = m_rfbScreen->frameBuffer;
 		rfbNewFramebuffer(m_rfbScreen, newBuf, width, height, 8, 3, 4);
 		delete[] oldBuf;
+	}
+
+	// Skip expensive image processing and screen marking if no VNC clients are connected
+	if (m_rfbScreen->clientHead == nullptr)
+	{
+		pw_stream_queue_buffer(m_stream, pwBuf);
+		return;
 	}
 
 	spa_data& d = buf->datas[0];
