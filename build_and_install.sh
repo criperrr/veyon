@@ -15,7 +15,7 @@ run_root() {
 export DEBIAN_FRONTEND=noninteractive
 
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
-if [ -z "${SCRIPT_SOURCE}" ] || [ "${SCRIPT_SOURCE}" = "bash" ] || [ ! -f "${SCRIPT_SOURCE}" ]; then
+if [ -z "${SCRIPT_SOURCE}" ] || [ "${SCRIPT_SOURCE}" = "bash" ] || [ "${SCRIPT_SOURCE}" = "sh" ] || [ ! -f "${SCRIPT_SOURCE}" ]; then
     CURRENT_DIR="$(pwd)"
 else
     CURRENT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
